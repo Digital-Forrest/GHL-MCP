@@ -1,0 +1,19 @@
+name = "ghl-mcp"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ghl-mcp-accounts"
+database_id = "e9e51241-6caf-48c3-907f-fa59ddae851e"
+
+# Secrets are set via CLI (never stored in this file):
+#   wrangler secret put MCP_AUTH_TOKEN
+#   wrangler secret put MASTER_KEY        (openssl rand -base64 32)
+#
+# Optional fallback secrets (used when no D1 account is configured):
+#   wrangler secret put GHL_API_KEY
+#   wrangler secret put GHL_LOCATION_ID
+
+[vars]
+# No public env vars needed — all sensitive values are secrets
