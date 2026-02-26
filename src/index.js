@@ -6,7 +6,7 @@
  *   GET  /oauth/authorize                          — OAuth authorization (no auth)
  *   POST /oauth/token                              — OAuth token exchange (no auth)
  *   POST /mcp                                      — MCP protocol endpoint (Bearer auth)
- *   GET  /admin                                    — Account management UI (no server auth)
+ *   GET  /admin                                    — Account management UI (Cloudflare Access JWT)
  *   *    /api/accounts/*                           — Account REST API (Bearer auth)
  *   GET  /health                                   — Health check (no auth)
  *   *                                              — 404
@@ -15,6 +15,7 @@
  */
 
 import { validateAuth } from './auth.js';
+import { validateAccessJWT } from './access.js';
 import { handleMCP } from './mcp.js';
 import { handleAdmin, handleAccountsAPI } from './admin.js';
 import { handleOAuthDiscovery, handleOAuthAuthorize, handleOAuthToken } from './oauth.js';
@@ -75,6 +76,10 @@ export default {
 
     // ── Admin UI ──────────────────────────────────────────────────────────────
     if (url.pathname === '/admin' && request.method === 'GET') {
+      const authorized = await validateAccessJWT(request);
+      if (!authorized) {
+        return withSecurityHeaders(new Response('Forbidden', { status: 403 }));
+      }
       return withSecurityHeaders(handleAdmin());
     }
 
