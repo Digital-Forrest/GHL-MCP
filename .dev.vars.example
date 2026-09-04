@@ -1,0 +1,25 @@
+# Copy this file to .dev.vars for local development (`npm run dev`).
+# .dev.vars is git-ignored. Never commit real values.
+
+# Bearer token for POST /mcp and /api/accounts.
+# Generate with: openssl rand -hex 32
+MCP_AUTH_TOKEN=replace_me
+
+# AES-256 key used to encrypt GHL API keys stored in D1.
+# MUST be base64, not hex. Generate with: openssl rand -base64 32
+MASTER_KEY=replace_me
+
+# Cloudflare Access config for the /admin page.
+# ACCESS_TEAM_DOMAIN is the part before .cloudflareaccess.com.
+# ACCESS_AUD is the Application Audience (AUD) tag of the Access app.
+# Leave these blank locally: /admin will return 403, which is the safe default.
+ACCESS_TEAM_DOMAIN=
+ACCESS_AUD=
+
+# Optional. Comma-separated origins allowed as an OAuth redirect target.
+# Defaults to https://claude.ai,https://claude.com when unset.
+# OAUTH_REDIRECT_ORIGINS=https://claude.ai,https://claude.com
+
+# Optional fallback credentials, used only when no account row exists in D1.
+# GHL_API_KEY=
+# GHL_LOCATION_ID=

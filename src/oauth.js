@@ -7,11 +7,49 @@
  * of (client_id:redirect_uri) keyed on MCP_AUTH_TOKEN, so it cannot be
  * forged and requires no server-side storage.
  *
+ * redirect_uri is checked against an origin allowlist before any redirect is
+ * issued, so this endpoint cannot be used as an open redirect.
+ * Configure with the OAUTH_REDIRECT_ORIGINS var (comma-separated origins).
+ *
+ * NOTE ON TOKEN LIFETIME: the token response advertises expires_in for spec
+ * compliance, but the returned access_token IS MCP_AUTH_TOKEN. It does not
+ * self-expire. To revoke access, rotate the MCP_AUTH_TOKEN secret and
+ * redeploy.
+ *
  * Endpoints:
  *   GET  /.well-known/oauth-authorization-server  — discovery metadata
  *   GET  /oauth/authorize                          — authorization endpoint
  *   POST /oauth/token                              — token endpoint
  */
+
+/** Origins allowed as an OAuth redirect target when none are configured. */
+const DEFAULT_REDIRECT_ORIGINS = ['https://claude.ai', 'https://claude.com'];
+
+/**
+ * Check a redirect_uri against the configured origin allowlist.
+ *
+ * Only the exact origin is compared — no wildcards and no prefix matching,
+ * so "https://claude.ai.evil.com" can never match "https://claude.ai".
+ *
+ * @param {string} redirectUri
+ * @param {object} env
+ * @returns {boolean}
+ */
+export function isAllowedRedirect(redirectUri, env) {
+  const configured = typeof env?.OAUTH_REDIRECT_ORIGINS === 'string'
+    ? env.OAUTH_REDIRECT_ORIGINS.split(',').map(o => o.trim()).filter(Boolean)
+    : [];
+  const allowed = configured.length > 0 ? configured : DEFAULT_REDIRECT_ORIGINS;
+
+  let origin;
+  try {
+    origin = new URL(redirectUri).origin;
+  } catch {
+    return false;
+  }
+
+  return allowed.includes(origin);
+}
 
 /**
  * Return OAuth 2.0 authorization server metadata (RFC 8414).
@@ -56,6 +94,13 @@ export async function handleOAuthAuthorize(url, env) {
 
   if (responseType !== 'code') {
     return new Response('Only response_type=code is supported', { status: 400 });
+  }
+
+  // Reject any redirect target that is not explicitly allowed. This must run
+  // before a code is signed so the endpoint is neither an open redirect nor a
+  // signing oracle for arbitrary attacker-chosen input.
+  if (!isAllowedRedirect(redirectUri, env)) {
+    return new Response('redirect_uri is not allowed', { status: 400 });
   }
 
   if (!env.MCP_AUTH_TOKEN) {
@@ -107,6 +152,10 @@ export async function handleOAuthToken(request, env) {
 
   if (!env.MCP_AUTH_TOKEN) {
     return tokenError('server_error', 'Server not configured');
+  }
+
+  if (!isAllowedRedirect(redirect_uri, env)) {
+    return tokenError('invalid_grant', 'redirect_uri is not allowed');
   }
 
   if (!timingSafeEqual(client_secret, env.MCP_AUTH_TOKEN)) {

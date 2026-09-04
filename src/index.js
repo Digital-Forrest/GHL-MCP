@@ -76,7 +76,7 @@ export default {
 
     // ── Admin UI ──────────────────────────────────────────────────────────────
     if (url.pathname === '/admin' && request.method === 'GET') {
-      const authorized = await validateAccessJWT(request);
+      const authorized = await validateAccessJWT(request, env);
       if (!authorized) {
         return withSecurityHeaders(new Response('Forbidden', { status: 403 }));
       }

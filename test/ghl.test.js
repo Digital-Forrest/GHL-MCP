@@ -101,16 +101,64 @@ describe('ghlRequest', () => {
     expect(url).toContain('locationId=loc_abc123');
   });
 
-  it('does not duplicate locationId if already in params', async () => {
+  // ── Sub-account lock ───────────────────────────────────────────────────────
+  // The server's location_id must always win. A caller must never be able to
+  // aim the configured API key at a different GHL sub-account.
+
+  it('overwrites a caller-supplied locationId in params', async () => {
     fetchSpy.mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
 
-    await ghlRequest('GET', '/contacts/', credentials, { params: { locationId: 'custom_loc' } });
+    await ghlRequest('GET', '/contacts/', credentials, { params: { locationId: 'attacker_loc' } });
 
     const [url] = fetchSpy.mock.calls[0];
     const u = new URL(url);
     const locationIds = u.searchParams.getAll('locationId');
     expect(locationIds).toHaveLength(1);
-    expect(locationIds[0]).toBe('custom_loc');
+    expect(locationIds[0]).toBe('loc_abc123');
+  });
+
+  it('overwrites a locationId smuggled into the path query string', async () => {
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+
+    await ghlRequest('GET', '/contacts/?locationId=attacker_loc', credentials);
+
+    const [url] = fetchSpy.mock.calls[0];
+    const u = new URL(url);
+    expect(u.searchParams.getAll('locationId')).toEqual(['loc_abc123']);
+    expect(url).not.toContain('attacker_loc');
+  });
+
+  it('overwrites a locationId smuggled into the path alongside other params', async () => {
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+
+    await ghlRequest('GET', '/contacts/?query=bob&locationId=attacker_loc', credentials);
+
+    const [url] = fetchSpy.mock.calls[0];
+    const u = new URL(url);
+    expect(u.searchParams.get('query')).toBe('bob');
+    expect(u.searchParams.getAll('locationId')).toEqual(['loc_abc123']);
+  });
+
+  it('overwrites a caller-supplied locationId in the request body', async () => {
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+
+    await ghlRequest('POST', '/contacts/', credentials, {
+      body: { firstName: 'Bob', locationId: 'attacker_loc' },
+    });
+
+    const [, init] = fetchSpy.mock.calls[0];
+    const sent = JSON.parse(init.body);
+    expect(sent.locationId).toBe('loc_abc123');
+    expect(sent.firstName).toBe('Bob');
+  });
+
+  it('leaves a body without locationId untouched', async () => {
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+
+    await ghlRequest('POST', '/contacts/', credentials, { body: { firstName: 'Bob' } });
+
+    const [, init] = fetchSpy.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual({ firstName: 'Bob' });
   });
 
   it('returns { error: false, data } on a 200 response', async () => {
