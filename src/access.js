@@ -3,23 +3,36 @@
  *
  * Validates the Cf-Access-Jwt-Assertion header on requests to protected
  * routes so they cannot be reached by bypassing Cloudflare Access.
+ *
+ * Configuration comes from the environment, never from source, so the same
+ * code can be deployed to any Cloudflare account:
+ *
+ *   ACCESS_TEAM_DOMAIN  Zero Trust team name, the part before
+ *                       .cloudflareaccess.com (e.g. "acme")
+ *   ACCESS_AUD          Application Audience (AUD) tag of the Access app
+ *
+ * Both are set with `wrangler secret put`. If either is missing, validation
+ * FAILS CLOSED — a half-configured deployment locks the protected route
+ * rather than exposing it.
  */
 
-const CERTS_URL = 'https://inboundwizard.cloudflareaccess.com/cdn-cgi/access/certs';
-const AUD = '2265e8375cb639a461d7c6ba2b415cbc0ef97c368e1897269a8a3ee9438f2d9e';
-
-// Module-level JWK cache (lives for the Worker instance lifetime)
+// Module-level JWK cache, keyed by certs URL so a config change can never
+// serve keys fetched for a different team.
 let cachedKeys = null;
+let cachedUrl = null;
 let cacheTime = 0;
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
-async function getPublicKeys() {
+async function getPublicKeys(certsUrl) {
   const now = Date.now();
-  if (cachedKeys && now - cacheTime < CACHE_TTL_MS) return cachedKeys;
-  const res = await fetch(CERTS_URL);
+  if (cachedKeys && cachedUrl === certsUrl && now - cacheTime < CACHE_TTL_MS) {
+    return cachedKeys;
+  }
+  const res = await fetch(certsUrl);
   if (!res.ok) throw new Error('Failed to fetch Cloudflare Access JWKs');
   const { keys } = await res.json();
   cachedKeys = keys;
+  cachedUrl = certsUrl;
   cacheTime = now;
   return keys;
 }
@@ -34,13 +47,22 @@ function base64urlDecode(str) {
 /**
  * Validate a Cloudflare Access JWT from the incoming request.
  *
- * Returns true only if the token is present, unexpired, targets the correct
- * audience, and has a valid RS256 signature from Cloudflare's public keys.
+ * Returns true only if Access is configured AND the token is present,
+ * unexpired, targets the correct audience, and has a valid RS256 signature
+ * from Cloudflare's public keys.
  *
  * @param {Request} request
+ * @param {object} env - Cloudflare Worker environment bindings
  * @returns {Promise<boolean>}
  */
-export async function validateAccessJWT(request) {
+export async function validateAccessJWT(request, env) {
+  // Fail closed when Access is not configured for this deployment.
+  const teamDomain = env?.ACCESS_TEAM_DOMAIN;
+  const aud = env?.ACCESS_AUD;
+  if (!teamDomain || !aud) return false;
+
+  const certsUrl = `https://${teamDomain}.cloudflareaccess.com/cdn-cgi/access/certs`;
+
   const token = request.headers.get('Cf-Access-Jwt-Assertion');
   if (!token) return false;
 
@@ -60,13 +82,13 @@ export async function validateAccessJWT(request) {
   if (!payload.exp || payload.exp < Date.now() / 1000) return false;
 
   // Reject tokens not issued for this application
-  const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-  if (!aud.includes(AUD)) return false;
+  const tokenAud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+  if (!tokenAud.includes(aud)) return false;
 
   // Find the matching public key by key ID
   let keys;
   try {
-    keys = await getPublicKeys();
+    keys = await getPublicKeys(certsUrl);
   } catch {
     return false;
   }

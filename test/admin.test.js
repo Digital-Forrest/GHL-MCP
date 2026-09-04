@@ -11,6 +11,7 @@
 
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { SELF, env } from 'cloudflare:test';
+import { handleAdmin } from '../src/admin.js';
 
 const TOKEN = 'integration-test-token';
 const AUTH = { Authorization: `Bearer ${TOKEN}` };
@@ -62,36 +63,42 @@ beforeEach(async () => {
 });
 
 // ── Admin UI ─────────────────────────────────────────────────────────────────
+//
+// /admin is gated by Cloudflare Access, not by the bearer token. The test
+// environment sets no ACCESS_TEAM_DOMAIN / ACCESS_AUD, so validation fails
+// closed and every request is refused with 403. That is the intended
+// behaviour for an unconfigured deployment.
 
 describe('GET /admin', () => {
-  it('returns 401 without a Bearer token', async () => {
+  it('returns 403 with no Cloudflare Access header', async () => {
     const res = await SELF.fetch('http://localhost/admin');
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
   });
 
-  it('returns 401 with a wrong token', async () => {
+  it('returns 403 with a junk Cloudflare Access header', async () => {
     const res = await SELF.fetch(
       new Request('http://localhost/admin', {
-        headers: { Authorization: 'Bearer wrong' },
+        headers: { 'Cf-Access-Jwt-Assertion': 'not.a.jwt' },
       })
     );
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
   });
 
-  it('returns 200 with text/html content type', async () => {
+  it('is not reachable with only a valid bearer token', async () => {
     const res = await SELF.fetch(new Request('http://localhost/admin', { headers: AUTH }));
-    expect(res.status).toBe(200);
-    expect(res.headers.get('Content-Type')).toContain('text/html');
+    expect(res.status).toBe(403);
   });
 
-  it('includes security headers', async () => {
-    const res = await SELF.fetch(new Request('http://localhost/admin', { headers: AUTH }));
+  it('includes security headers on the refusal', async () => {
+    const res = await SELF.fetch('http://localhost/admin');
     expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
     expect(res.headers.get('Cache-Control')).toBe('no-store');
   });
 
-  it('response body contains the page heading', async () => {
-    const res = await SELF.fetch(new Request('http://localhost/admin', { headers: AUTH }));
+  it('handleAdmin() renders the management page', async () => {
+    const res = handleAdmin();
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('text/html');
     const text = await res.text();
     expect(text).toContain('GHL MCP');
   });

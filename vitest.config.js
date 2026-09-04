@@ -6,7 +6,7 @@ export default defineWorkersConfig({
       workers: {
         wrangler: { configPath: './wrangler.toml' },
         miniflare: {
-          vars: {
+          bindings: {
             MCP_AUTH_TOKEN: 'integration-test-token',
             MASTER_KEY: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
           },

@@ -52,7 +52,8 @@ export function sanitizePath(path) {
  * Automatically injects:
  * - Authorization header with credentials.api_key
  * - Version header (2021-07-28)
- * - locationId query param (if not already present)
+ * - locationId query param, always overwriting any caller-supplied value
+ * - locationId in the request body, when the caller supplied one
  *
  * @param {'GET'|'POST'|'PUT'|'PATCH'|'DELETE'} method
  * @param {string} path - API path, e.g. /contacts/
@@ -71,10 +72,11 @@ export async function ghlRequest(method, path, credentials, { params, body } = {
     }
   }
 
-  // Always scope requests to the configured sub-account
-  if (!url.searchParams.has('locationId')) {
-    url.searchParams.set('locationId', credentials.location_id);
-  }
+  // Always scope requests to the configured sub-account.
+  // This runs AFTER caller-supplied params and overwrites any locationId the
+  // caller smuggled in via `path` or `params`, so a tool call can never be
+  // aimed at a different GHL sub-account.
+  url.searchParams.set('locationId', credentials.location_id);
 
   /** @type {RequestInit} */
   const init = {
@@ -88,7 +90,13 @@ export async function ghlRequest(method, path, credentials, { params, body } = {
 
   // Attach body for mutating methods
   if (body !== undefined && method !== 'GET' && method !== 'DELETE') {
-    const bodyStr = JSON.stringify(body);
+    // Same sub-account lock for the request body: if the caller supplied a
+    // locationId, replace it with the configured one.
+    const safeBody =
+      body && typeof body === 'object' && !Array.isArray(body) && 'locationId' in body
+        ? { ...body, locationId: credentials.location_id }
+        : body;
+    const bodyStr = JSON.stringify(safeBody);
     if (bodyStr.length > MAX_BODY_BYTES) {
       throw new Error('Request body exceeds 1 MB limit');
     }
